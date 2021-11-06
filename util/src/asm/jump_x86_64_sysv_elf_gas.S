@@ -30,8 +30,11 @@
 .type jump_fcontext,@function
 .align 16
 jump_fcontext:
+    /* 将栈顶向下移动 0x38字节 因为调用jump_fcontext的时候已经在栈中保存了返回地址 向下即为增加栈，不会覆盖之前的内容*/
     leaq  -0x38(%rsp), %rsp /* prepare stack */
 
+
+    /* 将需要保存的寄存器保存到 %rsp中 也就是context中*/
 #if !defined(BOOST_USE_TSX)
     stmxcsr  (%rsp)     /* save MMX control- and status-word */
     fnstcw   0x4(%rsp)  /* save x87 control-word */
@@ -45,13 +48,17 @@ jump_fcontext:
     movq  %rbp, 0x30(%rsp)  /* save RBP */
 
     /* store RSP (pointing to context-data) in RAX */
+    /* 保存 %rsp（旧context的起始地址） 到 %rax中 */
     movq  %rsp, %rax
 
     /* restore RSP (pointing to context-data) from RDI */
+    /* 将to_context（函数参数中的目标context）的起始地址保存到%rsp中 */
     movq  %rdi, %rsp
 
+    /* 将to_context的目标函数地址 保存到%r8寄存器 用于最后的jmp指令*/
     movq  0x38(%rsp), %r8  /* restore return-address */
 
+    /* 将to_context中的其他数据 恢复到寄存器中*/
 #if !defined(BOOST_USE_TSX)
     ldmxcsr  (%rsp)     /* restore MMX control- and status-word */
     fldcw    0x4(%rsp)  /* restore x87 control-word */
@@ -64,9 +71,13 @@ jump_fcontext:
     movq  0x28(%rsp), %rbx  /* restore RBX */
     movq  0x30(%rsp), %rbp  /* restore RBP */
 
+    /* to_context是make_fcontext制作， 当时分配的大小即为0x40 现在进行回收*/
+    /* 本函数分配的是0x38 省去了返回地址的位置 因为call会自动保存返回地址 所以context都是0x40大小*/
     leaq  0x40(%rsp), %rsp /* prepare stack */
 
     /* return transfer_t from jump */
+    /* 构造返回的from_context的transfer_t*/
+    /* rsi中存储的是调用的参数*/
 #if !defined(_ILP32)
     /* RAX == fctx, RDX == data */
     movq  %rsi, %rdx
@@ -75,6 +86,8 @@ jump_fcontext:
     salq  $32, %rsi
     orq   %rsi, %rax
 #endif
+
+    /* 将构造好的transfer_t作为参数 传递给to_context的入口函数 */
     /* pass transfer_t as first arg in context function */
 #if !defined(_ILP32)
     /* RDI == fctx, RSI == data */

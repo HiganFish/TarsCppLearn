@@ -2128,6 +2128,9 @@ void TC_EpollServer::initHandle()
 	{
 		//网络线程和处理线程是同一个线程(一对一)
 		//不同的连接丢给不同的网路线程处理
+        /**
+         * 初始情況下 这里只有类似muduo中负责管理listenfd的Adapter的一个Adapter
+         */
 		for (auto & bindAdapter : _bindAdapters)
 		{
 			vector<HandlePtr> & hds = bindAdapter->getHandles();

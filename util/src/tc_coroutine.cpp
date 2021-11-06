@@ -239,34 +239,46 @@ void TC_CoroutineInfo::setStackContext(stack_context stack_ctx)
 
 void TC_CoroutineInfo::registerFunc(const std::function<void ()>& callback)
 {
+    // 协程实际执行函数 或者叫做task任务
     _callback           = callback;
 
+    // 协程内部使用函数？ corotineProc 调用了 _callback
     _init_func.coroFunc = TC_CoroutineInfo::corotineProc;
 
     _init_func.args     = this;
 
+    // 每个协程都有自己预先分配的 协程栈指针和大小 在协程栈中创建一个协程的栈
 	fcontext_t ctx      = make_fcontext(_stack_ctx.sp, _stack_ctx.size, TC_CoroutineInfo::corotineEntry);
 
+    // 切换到已经创建好的协程 返回之前的状态保存 即为所谓的主协程。
 	transfer_t tf       = jump_fcontext(ctx, this);
+    // 从transfer_t t = jump_fcontext(tf.fctx, NULL); 处恢复回来
+    // 这里tf保存的是ctx协程。即从协程的context
 
 	//实际的ctx
 	this->setCtx(tf.fctx);
 }
 
+// 猜测是将 tf 存储在了 以协程栈为基准的 固定偏移的位置上
+// 猜测正确了
 void TC_CoroutineInfo::corotineEntry(transfer_t tf)
 {
+    // tf.data是jump的时候传入的自定义参数
     TC_CoroutineInfo * coro = static_cast< TC_CoroutineInfo * >(tf.data);
 
+    // 拿到了外面set的值
     auto    func  = coro->_init_func.coroFunc;
     void*    args = coro->_init_func.args;
 
+    // 这里的fctx是调用jump_fcontext协程的上下文 相当于恢复回原本的协程执行。
+    // 这里返回的才是所谓主协程的context
 	transfer_t t = jump_fcontext(tf.fctx, NULL);
 
-	//拿到自己的协程堆栈, 当前协程结束以后, 好跳转到main
+	// 拿到自己的协程堆栈, 当前协程结束以后, 好跳转到main
 	coro->_scheduler->setMainCtx(t.fctx);
 
     //再跳转到具体函数
-    func(args, t);
+    func(args, t); // corotineProc 旧的传了过去？ 不过下面这个函数也没用到
 }
 
 void TC_CoroutineInfo::corotineProc(void * args, transfer_t t)
@@ -289,9 +301,10 @@ void TC_CoroutineInfo::corotineProc(void * args, transfer_t t)
 
     TC_CoroutineScheduler* scheduler =  coro->getScheduler();
     scheduler->decUsedSize();
-    scheduler->moveToFreeList(coro);
+    scheduler->moveToFreeList(coro); // 当前协程任务结束后 把自己放到空闲队列中
 
-    //当前业务执行完, 会跳到main
+    // 当前业务执行完, 会跳到main
+    // 从上面的函数中看出了 getMainCoroutine 返回的就是所谓主协程的上下文。
 	scheduler->switchCoro(&(scheduler->getMainCoroutine()));
 }
 
@@ -453,6 +466,7 @@ uint32_t TC_CoroutineScheduler::go(const std::function<void ()> &callback)
             return 0;
     }
 
+    // 从空闲的协程链表中 取出一个空闲协程 同时将这个协程从空闲链表移除
     TC_CoroutineInfo *coro = _free._next;
     assert(coro != NULL);
 
@@ -462,6 +476,7 @@ uint32_t TC_CoroutineScheduler::go(const std::function<void ()> &callback)
 
     coro->setStatus(TC_CoroutineInfo::CORO_AVAIL);
 
+    // 只是更改了协程的状态就 将其添加到了就绪链表中
     TC_CoroutineInfo::CoroutineAddTail(coro, &_avail);
 
     coro->registerFunc(callback);
